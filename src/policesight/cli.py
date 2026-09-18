@@ -120,6 +120,160 @@ def data_quality(
             raise typer.Exit(code=EXIT_RUNTIME)
 
 
+hotspot_app = typer.Typer(help="时空热点分析（KDE / STKDE / ST-DBSCAN / 定标测评）", no_args_is_help=True)
+app.add_typer(hotspot_app, name="hotspot")
+
+
+@hotspot_app.command("kde")
+def hotspot_kde(
+    data_dir: str = typer.Option("_synth", "--data-dir", help="合成数据目录"),
+    cell: float = typer.Option(200.0, "--cell", help="网格边长（米）"),
+    bandwidth: float = typer.Option(300.0, "--bandwidth", help="高斯核带宽（米）"),
+    top_n: int = typer.Option(15, "--top-n", help="显示峰点数"),
+    as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
+) -> None:
+    """KDE 核密度：热力图网格 + 峰点。"""
+    from pathlib import Path
+
+    from .hotspot.bench import load_dataset
+    from .hotspot.kde import kde_grid, kde_peaks
+
+    if not (Path(data_dir) / "cases.csv").exists():
+        console.print(f"[red]PS-E005：未找到 {data_dir}/cases.csv，请先运行 policesight data generate[/red]")
+        raise typer.Exit(code=EXIT_RUNTIME)
+    data = load_dataset(data_dir)
+    density, extent = kde_grid(data["x"], data["y"], cell_m=cell, bandwidth_m=bandwidth)
+    peaks = kde_peaks(density, extent)
+    if as_json:
+        console.print_json(jsonlib.dumps({"grid": list(density.shape), "extent": extent, "peaks": peaks[:top_n]}, ensure_ascii=False))
+        return
+    table = Table(title=f"KDE 峰点 Top{min(top_n, len(peaks))} · 网格 {density.shape[1]}×{density.shape[0]}（{cell:g}m）")
+    table.add_column("#", no_wrap=True)
+    table.add_column("x_m", justify="right")
+    table.add_column("y_m", justify="right")
+    table.add_column("分值", justify="right")
+    for i, peak in enumerate(peaks[:top_n], 1):
+        table.add_row(str(i), f"{peak['x']:.0f}", f"{peak['y']:.0f}", f"{peak['score']:.1f}")
+    console.print(table)
+
+
+@hotspot_app.command("stkde")
+def hotspot_stkde(
+    data_dir: str = typer.Option("_synth", "--data-dir"),
+    step: int = typer.Option(2, "--step", help="时间窗步长（天）"),
+    cell: float = typer.Option(250.0, "--cell", help="空间网格边长（米）"),
+    top_n: int = typer.Option(10, "--top-n"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """STKDE 时空热点：显著点（含时间窗）。"""
+    from pathlib import Path
+
+    from .hotspot.bench import load_dataset
+    from .hotspot.stkde import stkde_cube, stkde_points
+
+    if not (Path(data_dir) / "cases.csv").exists():
+        console.print(f"[red]PS-E005：未找到 {data_dir}/cases.csv[/red]")
+        raise typer.Exit(code=EXIT_RUNTIME)
+    data = load_dataset(data_dir)
+    cube, extent, _nw = stkde_cube(data["x"], data["y"], data["day"], cell_m=cell, step_days=step, days_total=int(data["day"].max()) + 1)
+    points = stkde_points(cube, extent, step_days=step, start_date=data["truth"]["params"]["start_date"])
+    if as_json:
+        console.print_json(jsonlib.dumps(points[:top_n], ensure_ascii=False))
+        return
+    table = Table(title=f"STKDE 显著点 Top{min(top_n, len(points))} · 立方体 {cube.shape[0]}×{cube.shape[1]}×{cube.shape[2]}")
+    table.add_column("#", no_wrap=True)
+    table.add_column("时间窗")
+    table.add_column("x_m", justify="right")
+    table.add_column("y_m", justify="right")
+    table.add_column("分值", justify="right")
+    for i, point in enumerate(points[:top_n], 1):
+        table.add_row(str(i), f"{point['window'][0]} 起", f"{point['x']:.0f}", f"{point['y']:.0f}", f"{point['score']:.1f}")
+    console.print(table)
+
+
+@hotspot_app.command("cluster")
+def hotspot_cluster(
+    data_dir: str = typer.Option("_synth", "--data-dir"),
+    eps_m: float = typer.Option(300.0, "--eps-m", help="空间邻域（米）"),
+    eps_t: float = typer.Option(7.0, "--eps-t", help="时间邻域（天）"),
+    min_samples: int = typer.Option(5, "--min-samples", help="最小簇规模"),
+    out: str = typer.Option("", "--out", help="聚类结果导出 JSON 路径（可选）"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """ST-DBSCAN 时空聚类（cKDTree；含参数体检）。"""
+    from pathlib import Path
+
+    from .hotspot.bench import load_dataset
+    from .hotspot.stcluster import cluster_summary, st_dbscan
+
+    if not (Path(data_dir) / "cases.csv").exists():
+        console.print(f"[red]PS-E005：未找到 {data_dir}/cases.csv[/red]")
+        raise typer.Exit(code=EXIT_RUNTIME)
+    data = load_dataset(data_dir)
+    labels = st_dbscan(data["x"], data["y"], data["day"], eps_m=eps_m, eps_t=eps_t, min_samples=min_samples)
+    summary = cluster_summary(data["x"], data["y"], data["day"], labels, types=data["types"], eps_m=eps_m)
+    summary["params"] = {"eps_m": eps_m, "eps_t": eps_t, "min_samples": min_samples}
+    if out:
+        Path(out).write_text(jsonlib.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
+    if as_json:
+        console.print_json(jsonlib.dumps(summary, ensure_ascii=False))
+        return
+    clusters = sorted(summary["clusters"], key=lambda c: c["n"], reverse=True)[:10]
+    table = Table(title=f"ST-DBSCAN 簇 Top{len(clusters)}（共 {summary['n_clusters']} 簇 · 噪声比 {summary['noise_ratio']:.1%}）")
+    table.add_column("#", no_wrap=True)
+    table.add_column("规模", justify="right")
+    table.add_column("中心 x_m", justify="right")
+    table.add_column("中心 y_m", justify="right")
+    table.add_column("半径 m", justify="right")
+    table.add_column("时间跨度 d", justify="right")
+    table.add_column("主要类型")
+    for cluster in clusters:
+        table.add_row(
+            str(cluster["id"]),
+            str(cluster["n"]),
+            f"{cluster['center_m'][0]:.0f}",
+            f"{cluster['center_m'][1]:.0f}",
+            f"{cluster['radius_m']:.0f}",
+            f"{cluster['t_span']:.1f}",
+            cluster["dominant_type"],
+        )
+    console.print(table)
+    if summary["degenerate"]:
+        console.print(f"[yellow]PS-E006 参数体检：{summary['advice']}[/yellow]")
+
+
+@hotspot_app.command("bench")
+def hotspot_bench(
+    cases: int = typer.Option(50000, "--cases", help="每个 seed 的案件数"),
+    days: int = typer.Option(180, "--days"),
+    seeds: str = typer.Option("41,42,43,44,45", "--seeds", help="逗号分隔的 seed 列表"),
+    out: str = typer.Option("docs/benchmark.md", "--out", help="报告输出路径"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """定标测评：对照真值的多 seed 指标（热点召回 / 聚类还原）。"""
+    from .hotspot.bench import run_benchmark, write_benchmark_md
+
+    seed_list = tuple(int(item) for item in seeds.split(","))
+    console.print(f"开始定标测评：{cases} 条 × {days} 天 × {len(seed_list)} seeds（合成数据，无外部依赖）…")
+    report = run_benchmark(cases=cases, days=days, seeds=seed_list)
+    path = write_benchmark_md(report, out)
+    if as_json:
+        console.print_json(jsonlib.dumps(report["means"] | {"verdict": report["verdict"]}, ensure_ascii=False))
+    else:
+        means = report["means"]
+        verdict = report["verdict"]
+        table = Table(title="定标测评结果（多 seed 均值）")
+        table.add_column("指标", no_wrap=True)
+        table.add_column("均值", justify="right")
+        table.add_column("判定")
+        table.add_row("热点召回（KDE）", f"{means['kde_recall']:.1%}", "通过" if verdict["kde_recall_pass"] else "未达标")
+        table.add_row("热点召回（STKDE）", f"{means['stkde_recall']:.1%}", "参考")
+        table.add_row("聚类 F1（ST-DBSCAN）", f"{means['cluster_f1']:.3f}", "通过" if verdict["cluster_f1_pass"] else "未达标")
+        table.add_row("基线 F1（空间-only）", f"{means['baseline_f1']:.3f}", "对照")
+        console.print(table)
+    console.print(f"报告：[bold]{path}[/bold]")
+
+
 def main() -> None:
     app()
 
