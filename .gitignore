@@ -17,3 +17,4 @@ _playback_cache/
 # 模型权重与缓存（D 盘外置，不入库）
 models/
 .cache/
+_fresh*/
