@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/maoshenghe2-debug/PoliceSight/schemas/ground_truth.schema.json",
+  "title": "PoliceSight ground_truth.json（合成数据真值契约）",
+  "type": "object",
+  "required": ["schema_version", "params", "city", "hotspots", "series_groups", "anomalies"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "generated_at": { "type": "string" },
+    "params": {
+      "type": "object",
+      "required": ["cases", "days", "seed", "start_date", "grid"],
+      "properties": {
+        "cases": { "type": "integer", "minimum": 1 },
+        "days": { "type": "integer", "minimum": 1 },
+        "seed": { "type": "integer" },
+        "start_date": { "type": "string" },
+        "grid": {
+          "type": "object",
+          "required": ["nx", "ny", "cell_m"],
+          "properties": {
+            "nx": { "type": "integer" },
+            "ny": { "type": "integer" },
+            "cell_m": { "type": "number" }
+          }
+        },
+        "hotspot_share": { "type": "number" }
+      }
+    },
+    "city": {
+      "type": "object",
+      "required": ["name", "bbox_m"],
+      "properties": {
+        "name": { "type": "string" },
+        "bbox_m": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 }
+      }
+    },
+    "hotspots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "center_m", "radius_m", "window", "dominant_type", "expected_cases", "case_ids"],
+        "properties": {
+          "id": { "type": "string" },
+          "center_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+          "radius_m": { "type": "number" },
+          "window": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
+          "dominant_type": { "type": "string" },
+          "expected_cases": { "type": "integer" },
+          "case_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "series_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "anchor_m", "window", "types", "methods", "expected_cases", "case_ids"],
+        "properties": {
+          "id": { "type": "string" },
+          "anchor_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+          "window": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
+          "types": { "type": "array", "items": { "type": "string" } },
+          "methods": { "type": "array", "items": { "type": "string" } },
+          "expected_cases": { "type": "integer" },
+          "case_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "anomalies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "center_m", "grid_id", "window", "factor", "extra_cases", "case_ids"],
+        "properties": {
+          "id": { "type": "string" },
+          "center_m": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+          "grid_id": { "type": "string" },
+          "window": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
+          "factor": { "type": "number" },
+          "extra_cases": { "type": "integer" },
+          "case_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "benchmark_protocol": { "type": "object" }
+  }
+}

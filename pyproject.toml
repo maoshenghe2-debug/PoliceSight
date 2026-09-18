@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "policesight"
+version = "0.1.0"
+description = "PoliceSight · 警情时空智能研判平台（带真值的合成数据引擎 / KDE·STKDE 热点 / ST-DBSCAN 聚类 / 串并案图谱 / 预警 / 研判看板）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Maosheng He", email = "maoshenghe2@gmail.com" }]
+keywords = ["gis", "spatiotemporal", "kde", "st-dbscan", "crime-analysis", "synthetic-data", "dashboard"]
+dependencies = [
+  "typer>=0.12",
+  "rich>=13.7",
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "scikit-learn>=1.4",
+  "shapely>=2.0",
+  "networkx>=3.2",
+  "statsmodels>=0.14",
+  "pyyaml>=6.0",
+  "jsonschema>=4.20",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "python-docx>=1.1",
+  "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5"]
+all = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5"]
+postgis = ["sqlalchemy>=2.0", "geoalchemy2>=0.14", "psycopg2-binary>=2.9"]
+
+[project.scripts]
+policesight = "policesight.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/maoshenghe2-debug/PoliceSight"
+Issues = "https://github.com/maoshenghe2-debug/PoliceSight/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/policesight"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "slow: 慢测试（大数据量 / 端到端）",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "B008", "RUF001", "RUF002", "RUF003"]
