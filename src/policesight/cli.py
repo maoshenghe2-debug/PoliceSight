@@ -481,6 +481,98 @@ def alert_rules() -> None:
     console.print(f"级别阈值：red ≥ {levels.get('red')}x · orange ≥ {levels.get('orange')}x · yellow ≥ {levels.get('yellow')}x")
 
 
+web_app = typer.Typer(help="研判看板（数据构建 / 本地服务）", no_args_is_help=True)
+app.add_typer(web_app, name="web")
+
+
+@web_app.command("build")
+def web_build(
+    data_dir: str = typer.Option("_synth", "--data-dir", help="数据目录（含 cases.csv / ground_truth.json）"),
+    out: str = typer.Option("", "--out", help="输出目录（默认 <数据目录>/web）"),
+    skip_link: bool = typer.Option(False, "--skip-link", help="跳过串并案分组（构建更快）"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """构建看板静态数据（热点 / 聚类 / 回放帧 / 预警 / 疑组 / 底图）。"""
+    from .web.build import build_web
+
+    console.print("构建看板数据中（含串并案分组约 1-2 分钟）…", highlight=False)
+    summary = build_web(data_dir, out or None, include_link=not skip_link)
+    if as_json:
+        console.print_json(jsonlib.dumps(summary, ensure_ascii=False))
+        return
+    table = Table(title=f"看板数据构建完成 · {summary['out_dir']}")
+    table.add_column("项", no_wrap=True)
+    table.add_column("值", justify="right")
+    table.add_row("案件", f"{summary['cases']:,}")
+    table.add_row("回放帧", str(summary["frames"]))
+    table.add_row("时空簇", str(summary["clusters"]))
+    table.add_row("预警", str(summary["alerts"]))
+    table.add_row("底图要素", str(summary["basemap_features"]))
+    table.add_row("产物大小", f"{sum(summary['files'].values()) / 1024 / 1024:.1f} MiB")
+    console.print(table)
+    console.print(f"启动服务：[bold]policesight web serve --data-dir {data_dir}[/bold]")
+
+
+@web_app.command("serve")
+def web_serve(
+    data_dir: str = typer.Option("_synth", "--data-dir", help="数据目录"),
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址（默认仅本机）"),
+    port: int = typer.Option(8770, "--port"),
+) -> None:
+    """启动研判看板（离线静态前端 + 只读数据接口）。"""
+    import uvicorn
+
+    from .web.serve import create_app
+
+    console.print(f"看板启动：http://{host}:{port}（数据目录 {data_dir}）")
+    uvicorn.run(create_app(data_dir), host=host, port=port, log_level="warning")
+
+
+report_app = typer.Typer(help="研判报告（周报 HTML + DOCX）", no_args_is_help=True)
+app.add_typer(report_app, name="report")
+
+
+@report_app.command("weekly")
+def report_weekly(
+    data_dir: str = typer.Option("_synth", "--data-dir", help="数据目录（需先 web build）"),
+    weeks_back: int = typer.Option(0, "--weeks-back", help="回看周数（0=最新周）"),
+    out: str = typer.Option("", "--out", help="输出目录（默认 <数据目录>/reports）"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """生成周研判报告（HTML + DOCX）。"""
+    from .report.report import build_weekly
+
+    result = build_weekly(data_dir, weeks_back=weeks_back, out_dir=out or None)
+    if as_json:
+        console.print_json(jsonlib.dumps(result, ensure_ascii=False))
+        return
+    console.print(f"周研判报告（第 {result['week_index'] + 1} 周 · {result['cases']} 起 · 预警 {result['alerts']} 条）：")
+    console.print(f"  HTML：[bold]{result['html']}[/bold]")
+    console.print(f"  DOCX：[bold]{result['docx']}[/bold]")
+
+
+@app.command()
+def demo(
+    data_dir: str = typer.Option("_synth", "--data-dir", help="数据目录（缺数据时自动生成）"),
+    cases: int = typer.Option(50000, "--cases", help="缺失时生成的数据量"),
+    days: int = typer.Option(180, "--days"),
+    seed: int = typer.Option(42, "--seed"),
+) -> None:
+    """端到端演示：数据 → 热点 → 聚类 → 串并案 → 预警 → 看板 → 周报。"""
+    from .demo import run_demo
+
+    console.print("PoliceSight 端到端演示开始（全本地计算，50k 规模约 2-4 分钟）…", highlight=False)
+    result = run_demo(data_dir, cases=cases, days=days, seed=seed)
+    table = Table(title=f"PoliceSight demo · 总耗时 {result['seconds']}s")
+    table.add_column("步骤", no_wrap=True)
+    table.add_column("结果")
+    table.add_column("耗时", justify="right")
+    for step in result["steps"]:
+        table.add_row(step["name"], step["detail"], f"{step['seconds']}s")
+    console.print(table)
+    console.print(f"数据目录：[bold]{result['data_dir']}[/bold]（看板服务：policesight web serve）")
+
+
 def main() -> None:
     app()
 

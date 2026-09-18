@@ -2,43 +2,71 @@
 
 > 带真值的合成警情数据引擎 → KDE/STKDE 时空热点 → ST-DBSCAN 聚类 → 串并案图谱 → 突增预警 → 单页研判看板与周研判报告。
 
-[![CI](https://github.com/maoshenghe2-debug/PoliceSight/actions/workflows/ci.yml/badge.svg)](https://github.com/maoshenghe2-debug/PoliceSight/actions/workflows/ci.yml)
+[![CI](https://github.com/maoshenghe2-debug/PoliceSight/actions/workflows/ci.yml/badge.svg)](https://github.com/maoshenghe2-debug/PoliceSight/actions)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
+![Data](https://img.shields.io/badge/数据-100%25%20合成-orange)
 
-## 定位与边界（先读这三点）
+**全部数据为合成数据**（虚构城市「滨江市」）· 全本地离线可复现 · 不涉及任何真实警情或个人数据 · 不做个体画像与预测。
 
-- **仅合成数据**：平台不包含任何真实警务数据或个人隐私数据；所有城市、案件、嫌疑线索均为程序生成的虚构数据。
-- **区域级资源配置辅助**：分析结论定位于宏观态势与资源投放参考，**不用于个人画像与个人预测**（明确规避预测性警务的伦理风险）。
-- **可量化验收**：数据生成器自带"真值"（预设热点 / 系列案分组 / 突增场景），所有算法效果（热点召回、聚类 F1、分组纯度）可对照真值一键复现。
+## 演示
+
+![研判看板](docs/assets/policesight-dashboard.png)
+
+时间轴回放（26 帧 · 周序滚动 7 日窗口 · 250m 网格）：
+
+![回放](docs/assets/policesight-play.gif)
+
+端到端一条命令（本机实测 **76s**，含 5 万条数据全链路与看板构建）：
+
+```bash
+policesight demo            # 数据 → 热点 → 聚类 → 串并案 → 预警 → 看板 → 周报
+policesight web serve       # 打开 http://127.0.0.1:8770
+```
+
+![demo](docs/assets/policesight-demo.png)
+
+## 核心能力
+
+| 模块 | 实现 | 评估（对照真值） |
+|---|---|---|
+| **合成数据引擎** | 5 万条 / 180 天 / **0.52s**；12 预设热点 + 6 系列案团伙 + 4 突增场景（逐案归属） | 质量检查 0 问题 |
+| **热点分析** | KDE 核密度 + STKDE 时空核密度（3D 网格高斯核） | 热点召回 **91.7%**（KDE）/ **100%**（STKDE） |
+| **时空聚类** | ST-DBSCAN（cKDTree 缩放度量，O(n log n)）+ 退化参数体检 | 聚类 **F1 0.867**（基线空间-only 0.531） |
+| **串并案** | 多特征相似度（时空/手法/文本）+ 团伙可疑度排名 + Louvain 图谱 | 纯度 0.52 @5万（0.835 @2万，规模效应如实披露） |
+| **趋势预警** | STL/ETS + YAML 规则（区域×类型 + 网格邻域双粒度） | 注入突增场景 **4/4 命中** · 无关预警 7.0% |
+| **研判看板** | 离线矢量底图 + 热力 + 回放 + 图表（Leaflet/ECharts 本地化） | 全离线、仅监听 127.0.0.1 |
+| **周研判报告** | HTML（内联 SVG）+ DOCX（python-docx） | 一条命令产出 |
+
+回归对照（`docs/benchmark.md` / `docs/benchmark-link-alert.md`，由 CLI 真实运行产出，可复现）：
+
+![link](docs/assets/policesight-link.png)
 
 ## 快速开始
 
 ```bash
+git clone https://github.com/maoshenghe2-debug/PoliceSight.git && cd PoliceSight
 uv venv --python 3.11 && uv pip install -e ".[all]"
-policesight doctor                                    # 环境自检
-policesight data generate --cases 50000 --days 180    # 生成 5 万条带真值合成警情
-policesight demo                                      # 全流程演示
+policesight doctor                                   # 环境自检（9 项）
+policesight data generate --cases 50000 --seed 42    # 合成数据 + 真值
+policesight hotspot bench --cases 50000 --seeds 41,42,43,44,45   # 定标测评
+policesight link run                                 # 串并案分组 + 评估
+policesight alert run                                # 突增预警 + 真值验收
+policesight web build && policesight web serve       # 看板
+policesight report weekly                            # 周报（HTML + DOCX）
 ```
 
-## 核心能力（v1.0 冻结范围）
+## 设计与边界
 
-| 模块 | 说明 |
-|---|---|
-| 合成数据引擎 ★ | 参数化城市/热点/系列案/突增生成，同步输出 `ground_truth.json`，5 万条 ≤5 分钟 |
-| 时空热点分析 | KDE 核密度 + STKDE 时空核密度（时段×空间联合显著热点），对照真值召回 ≥80%（≥5 seed 均值） |
-| ST-DBSCAN 聚类 | 基于 cKDTree 的时空双参数聚类；purity + recall/F 双指标 + degenerate baseline 对照 |
-| 串并案分析 | 时空/手法/文本多特征加权相似度 → 疑似系列案分组（附证据链）+ 二部图与社区发现 |
-| 趋势与预警 | STL/ETS 趋势分解 + YAML 规则引擎（突增/突降，含无突增集误报计数） |
-| 研判看板 | 单页看板（热力 + 列表 + 时间轴回放[预聚合帧]）+ 周研判报告（MD/DOCX，数字可溯源） |
-
-## 合规声明
-
-- 本平台**仅使用合成数据**，不含任何真实警务数据或个人隐私数据；
-- 分析结论定位于**宏观态势与资源配置辅助**，不用于个人画像与个人预测；
-- 使用者须遵守《数据安全法》《个人信息保护法》及公安数据管理相关规定；
-  如需接入真实数据，须在合法授权与合规评估前提下自行承担。
+- **真值同源**：数据生成器同步输出 `ground_truth.json`（预设热点/系列案/突增场景的逐案归属），所有算法评估都对照真值，协议写入报告；
+- **离线优先**：底图为仓库自带合成矢量图（CRS.Simple），前端依赖（Leaflet/ECharts）本地化，无任何外部请求；
+- **隐私边界**：全合成数据、不做个体画像/个体预测，预警为区域级资源配置辅助提示；
+- **可复现**：固定 seed 的确定性生成，`docs/*.md` 测评报告由 CLI/脚本真实运行产出。
 
 ## 许可
 
 [Apache-2.0](LICENSE) ｜ 第三方组件：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+
+---
+
+*作者：何茂生（Maosheng He）· 本项目为技术演示，与任何执法机构无关。*

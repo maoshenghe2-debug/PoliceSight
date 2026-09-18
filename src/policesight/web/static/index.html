@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoliceSight · 警情时空研判看板</title>
+<link rel="stylesheet" href="/static/vendor/leaflet.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">PoliceSight <span class="tag">合成数据演示 · 虚构城市「滨江市」</span></div>
+  <div class="meta-line" id="metaLine">加载中…</div>
+</header>
+<div id="layout">
+  <aside id="side">
+    <section>
+      <h3>图层</h3>
+      <label><input type="checkbox" id="lyrKde" checked> KDE 热点（全期）</label>
+      <label><input type="checkbox" id="lyrClusters" checked> 时空聚类</label>
+      <label><input type="checkbox" id="lyrGroups" checked> 疑似系列案组 Top</label>
+      <label><input type="checkbox" id="lyrAlerts" checked> 预警点</label>
+      <label><input type="checkbox" id="lyrCases"> 案件点（采样 3000）</label>
+    </section>
+    <section>
+      <h3>时间轴回放</h3>
+      <div class="row"><button id="playBtn">▶ 播放</button><span id="weekLabel">—</span></div>
+      <input type="range" id="weekSlider" min="0" max="0" value="0">
+      <div class="hint">周序滚动 7 日窗口 · 250m 网格聚合</div>
+    </section>
+    <section>
+      <h3>案件类型</h3>
+      <div id="chips" class="chips"></div>
+    </section>
+    <section>
+      <h3>数据概览</h3>
+      <div id="statsBox" class="stats"></div>
+    </section>
+    <section>
+      <h3>预警 <span class="hint" id="alertCount"></span></h3>
+      <ul id="alertList" class="alerts"></ul>
+    </section>
+  </aside>
+  <main>
+    <div id="map"></div>
+    <div id="charts">
+      <div id="trendChart"></div>
+      <div id="hwChart"></div>
+    </div>
+  </main>
+  <aside id="right">
+    <h3>疑似系列案组 Top10</h3>
+    <div class="hint">按团伙可疑度排序（紧致度 × 手法多样性 × 类型纯度 × 规模）</div>
+    <ol id="groupList" class="groups"></ol>
+    <div id="groupEval" class="hint"></div>
+  </aside>
+</div>
+<script src="/static/vendor/leaflet.js"></script>
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
