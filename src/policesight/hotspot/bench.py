@@ -50,6 +50,8 @@ def load_dataset(data_dir: Path | str) -> dict:
     day = np.array([(date.fromisoformat(r["time"][:10]) - start).days for r in rows])
     hour = np.array([int(r["time"][11:13]) for r in rows])
     types = np.array([r["type"] for r in rows])
+    methods = np.array([r["method"] for r in rows])
+    texts = [r["summary"] for r in rows]
     case_ids = [r["case_id"] for r in rows]
     group_of: dict[str, str] = {}
     for record in truth["hotspots"] + truth["series_groups"] + truth["anomalies"]:
@@ -61,6 +63,8 @@ def load_dataset(data_dir: Path | str) -> dict:
         "day": day,
         "hour": hour,
         "types": types,
+        "method": methods,
+        "text": texts,
         "case_ids": case_ids,
         "group_of": group_of,
         "truth": truth,

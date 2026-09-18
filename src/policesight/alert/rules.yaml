@@ -1,0 +1,33 @@
+# PoliceSight 预警规则（v1.0 规则档）
+#
+# 语义：对周序列：当前周案件数 ≥ max(min_count, 近 baseline_weeks 周均值 × factor) → 触发预警；
+#   级别按 factor 阈值划分：red ≥ 2.4 / orange ≥ 2.0 / yellow ≥ 1.8。
+# 粒度（scope）：
+#   - district_type：区域（片区）× 案件类型；
+#   - grid_neighborhood：500m 网格的 3×3 邻域（半径约 750m）× 案件类型（捕获细胞级突增）。
+# 定位：区域级资源配置辅助提示，不涉及个体预测。
+version: "1.0"
+
+defaults:
+  baseline_weeks: 8
+  min_count: 5
+
+levels:
+  red: 2.4
+  orange: 2.0
+  yellow: 1.8
+
+rules:
+  - id: surge-district-type
+    name: 区域-类型周突增
+    scope: district_type
+    factor: 1.8
+    min_count: 5
+    advice: "建议加强{district}「{type}」类案件重点部位巡防与视频巡查（本周 {current} 起，近 {weeks} 周均值 {baseline} 起，约 {factor}×）。"
+
+  - id: surge-grid-neighborhood
+    name: 网格邻域周突增
+    scope: grid_neighborhood
+    factor: 2.0
+    min_count: 20
+    advice: "建议关注 {district} {grid} 网格周边约 750m 范围「{type}」类案件周突增（本周 {current} 起，近 {weeks} 周均值 {baseline} 起，约 {factor}×）。"

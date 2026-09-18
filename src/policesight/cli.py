@@ -274,6 +274,213 @@ def hotspot_bench(
     console.print(f"报告：[bold]{path}[/bold]")
 
 
+link_app = typer.Typer(help="串并案分析（多特征相似度 / 疑似系列案组 / 关系图谱）", no_args_is_help=True)
+app.add_typer(link_app, name="link")
+
+
+@link_app.command("run")
+def link_run(
+    data_dir: str = typer.Option("_synth", "--data-dir"),
+    threshold: float = typer.Option(0.78, "--threshold", help="相似度阈值（0-1）"),
+    min_group: int = typer.Option(5, "--min-group", min=3, max=50, help="最小分组规模"),
+    search_m: float = typer.Option(800.0, "--search-m", help="候选对空间搜索半径（米）"),
+    search_days: float = typer.Option(21.0, "--search-days", help="候选对时间搜索窗（天）"),
+    top_k: int = typer.Option(10, "--top-k", help="展示 Top-K 候选组"),
+    out: str = typer.Option("", "--out", help="完整结果导出 JSON 路径（可选）"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """运行串并案分析：疑似系列案组 + 可疑度排名 + 真值评估。"""
+    from pathlib import Path
+
+    from .hotspot.bench import load_dataset
+    from .link.evaluate import evaluate_groups
+    from .link.group import find_groups, with_suspect_scores
+
+    if not (Path(data_dir) / "cases.csv").exists():
+        console.print(f"[red]PS-E005：未找到 {data_dir}/cases.csv[/red]")
+        raise typer.Exit(code=EXIT_RUNTIME)
+    data = load_dataset(data_dir)
+    cases = {
+        "x": data["x"],
+        "y": data["y"],
+        "day": data["day"],
+        "type": data["types"],
+        "method": data["method"],
+        "text": data["text"],
+        "case_ids": data["case_ids"],
+    }
+    console.print(f"串并案分析中（{len(data['x'])} 案件 · 阈值 {threshold} · 搜索 {search_m:g}m/{search_days:g}d）…")
+    result = find_groups(cases, threshold=threshold, min_group=min_group, search_m=search_m, search_days=search_days)
+    ranked = with_suspect_scores(result["groups"], cases)
+    evaluation = evaluate_groups({"groups": ranked}, data["truth"])
+    summary = {
+        "groups": len(ranked),
+        "pairs": result["pairs"],
+        "kept_pairs": result["kept_pairs"],
+        "threshold": threshold,
+        "evaluation": {key: evaluation[key] for key in ("truth_groups", "purity", "recall", "f1", "spurious_groups")},
+    }
+    if out:
+        Path(out).write_text(
+            jsonlib.dumps({"summary": summary, "top": ranked[:200]}, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+    if as_json:
+        console.print_json(jsonlib.dumps(summary, ensure_ascii=False))
+        return
+    table = Table(title=f"疑似系列案组 Top{min(top_k, len(ranked))}（共 {len(ranked)} 组 · 过阈对 {result['kept_pairs']}）")
+    table.add_column("组", no_wrap=True)
+    table.add_column("可疑度", justify="right")
+    table.add_column("规模", justify="right")
+    table.add_column("半径 m", justify="right")
+    table.add_column("手法", justify="right")
+    table.add_column("主要手法")
+    for group in ranked[:top_k]:
+        table.add_row(
+            group["id"],
+            f"{group['suspect_score']:.3f}",
+            str(group["n"]),
+            f"{group['radius_m']:.0f}",
+            str(len(group["methods"])),
+            " / ".join(group["methods"][:3]),
+        )
+    console.print(table)
+    console.print(
+        f"评估（对照真值 {evaluation['truth_groups']} 个预设系列案）：纯度 {evaluation['purity']:.2f} · "
+        f"召回 {evaluation['recall']:.2f} · F1 {evaluation['f1']:.2f} · 杂散组 {evaluation['spurious_groups']}"
+    )
+    if out:
+        console.print(f"完整结果：[bold]{out}[/bold]")
+
+
+@link_app.command("graph")
+def link_graph(
+    data_dir: str = typer.Option("_synth", "--data-dir"),
+    group: str = typer.Option("", "--group", help="组 id（默认取可疑度排名第一组）"),
+    out: str = typer.Option("", "--out", help="图谱 JSON 导出路径（可选）"),
+    gexf: str = typer.Option("", "--gexf", help="GEXF 导出路径（Gephi 可打开，可选）"),
+) -> None:
+    """为指定疑似系列案组构建关系图谱（案件-手法-网格 二部图 + Louvain 社区）。"""
+    from pathlib import Path
+
+    from .hotspot.bench import load_dataset
+    from .link.graph import build_group_graph, export_gexf, graph_to_json, louvain_communities
+    from .link.group import find_groups, with_suspect_scores
+
+    if not (Path(data_dir) / "cases.csv").exists():
+        console.print(f"[red]PS-E005：未找到 {data_dir}/cases.csv[/red]")
+        raise typer.Exit(code=EXIT_RUNTIME)
+    data = load_dataset(data_dir)
+    cases = {
+        "x": data["x"],
+        "y": data["y"],
+        "day": data["day"],
+        "type": data["types"],
+        "method": data["method"],
+        "text": data["text"],
+        "case_ids": data["case_ids"],
+    }
+    result = find_groups(cases)
+    ranked = with_suspect_scores(result["groups"], cases)
+    if not ranked:
+        console.print("[yellow]未发现分组（可尝试降低 --threshold）[/yellow]")
+        raise typer.Exit(code=EXIT_OK)
+    target = next((item for item in ranked if item["id"] == group), None) if group else ranked[0]
+    if target is None:
+        console.print(f"[red]未找到组 {group}[/red]")
+        raise typer.Exit(code=EXIT_USAGE)
+    graph = build_group_graph(cases, target)
+    communities = louvain_communities(graph)
+    console.print(
+        f"组 {target['id']}：{target['n']} 案件 · 节点 {graph.number_of_nodes()} · 边 {graph.number_of_edges()} · "
+        f"Louvain 社区 {len(communities)} 个（最大 {len(communities[0]) if communities else 0} 节点）"
+    )
+    if out:
+        Path(out).write_text(jsonlib.dumps(graph_to_json(graph), ensure_ascii=False), encoding="utf-8")
+        console.print(f"图谱 JSON：[bold]{out}[/bold]")
+    if gexf:
+        path = export_gexf(graph, gexf)
+        console.print(f"GEXF：[bold]{path}[/bold]")
+
+
+alert_app = typer.Typer(help="趋势与预警（规则引擎 / 真值验收）", no_args_is_help=True)
+app.add_typer(alert_app, name="alert")
+
+
+@alert_app.command("run")
+def alert_run(
+    data_dir: str = typer.Option("_synth", "--data-dir"),
+    out: str = typer.Option("", "--out", help="预警列表导出 JSON（可选）"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """执行预警规则：预警列表 + 突增场景验收（命中/误报）。"""
+    from pathlib import Path
+
+    from .alert.engine import alert_acceptance, run_alerts
+    from .hotspot.bench import load_dataset
+
+    if not (Path(data_dir) / "cases.csv").exists():
+        console.print(f"[red]PS-E005：未找到 {data_dir}/cases.csv[/red]")
+        raise typer.Exit(code=EXIT_RUNTIME)
+    data = load_dataset(data_dir)
+    cases = {"x": data["x"], "y": data["y"], "day": data["day"], "type": data["types"]}
+    result = run_alerts(cases, days_total=int(data["day"].max()) + 1, start_date=data["truth"]["params"]["start_date"])
+    acceptance = alert_acceptance(result["alerts"], data["truth"])
+    if out:
+        Path(out).write_text(jsonlib.dumps({"alerts": result["alerts"], "acceptance": acceptance}, ensure_ascii=False, indent=1), encoding="utf-8")
+    if as_json:
+        console.print_json(jsonlib.dumps({"acceptance": acceptance, "alerts": result["alerts"][:20]}, ensure_ascii=False))
+        return
+    level_color = {"red": "red", "orange": "yellow", "yellow": "yellow"}
+    table = Table(title=f"预警列表（共 {len(result['alerts'])} 条 · 显示前 12）")
+    table.add_column("级别", no_wrap=True)
+    table.add_column("区域")
+    table.add_column("类型")
+    table.add_column("周")
+    table.add_column("本周/基线", justify="right")
+    table.add_column("倍数", justify="right")
+    for alert in result["alerts"][:12]:
+        table.add_row(
+            f"[{level_color[alert['level']]}]{alert['level']}[/]",
+            alert["district"] + (f" {alert.get('grid', '')}" if alert.get("scope") == "grid_neighborhood" else ""),
+            alert["type"],
+            alert["week"][0],
+            f"{alert['current']}/{alert['baseline']:.0f}",
+            f"{alert['factor']:.1f}x",
+        )
+    console.print(table)
+    console.print(
+        f"验收：突增场景命中 {acceptance['hit']}/{acceptance['anomalies']} · "
+        f"热点区对齐 {acceptance['hotspot_aligned']} 条 · 无关预警 {acceptance['false_alerts']} 条（总预警 {acceptance['alerts_total']}）"
+    )
+
+
+@alert_app.command("rules")
+def alert_rules() -> None:
+    """查看当前预警规则（YAML 配置）。"""
+    from .alert.rules import DEFAULT_RULES_PATH, load_rules
+
+    doc = load_rules()
+    console.print(f"规则文件：{DEFAULT_RULES_PATH}")
+    table = Table(title=f"预警规则 v{doc.get('version')}（基线 {doc['defaults']['baseline_weeks']} 周）")
+    table.add_column("id", no_wrap=True)
+    table.add_column("名称")
+    table.add_column("粒度")
+    table.add_column("触发", justify="right")
+    table.add_column("最小数量", justify="right")
+    scope_label = {"district_type": "区域×类型", "grid_neighborhood": "网格邻域(3×3)"}
+    for rule in doc["rules"]:
+        table.add_row(
+            rule["id"],
+            rule["name"],
+            scope_label.get(str(rule.get("scope", "")), str(rule.get("scope", ""))),
+            f"≥ 基线×{rule['factor']}",
+            str(rule["min_count"]),
+        )
+    console.print(table)
+    levels = doc.get("levels") or {}
+    console.print(f"级别阈值：red ≥ {levels.get('red')}x · orange ≥ {levels.get('orange')}x · yellow ≥ {levels.get('yellow')}x")
+
+
 def main() -> None:
     app()
 
